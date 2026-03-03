@@ -5,13 +5,8 @@ import { AppService } from './app.service';
 export class AppController {
   constructor(private readonly appService: AppService) {}
 
-  @Get()
-  getHello(): string {
-    return this.appService.getHello();
-  }
-
-  @All('tag-read')
-  tagRead(@Req() request: any): any {
+  @All()
+  getHello(@Req() request: any): any {
     const requestDetails = {
       method: request.method,
       url: request.url,
@@ -27,14 +22,14 @@ export class AppController {
     };
 
     // Log to console for debugging
-    console.log('🏷️  RFID Reader Request Received:');
+    console.log('📡 Base URL Request Received:');
     console.log('=====================================');
     console.log(JSON.stringify(requestDetails, null, 2));
     console.log('=====================================');
 
-    // Return the details as response
+    // Return both the original hello message and request details
     return {
-      message: 'Request received and logged',
+      message: this.appService.getHello(),
       requestDetails
     };
   }
