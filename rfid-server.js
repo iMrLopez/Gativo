@@ -1,280 +1,247 @@
 const net = require('net');
-const os = require('os');
-const https = require('https');
-const http = require('http');
-require('dotenv').config();
+const config = require('./src/config');
+const networkUtils = require('./src/network-utils');
+const httpClient = require('./src/http-client');
+const debounceManager = require('./src/debounce-manager');
+const rfidProtocol = require('./src/rfid-protocol');
+const tagDatabase = require('./src/tag-database');
 
-const HOST = '0.0.0.0';
-const PORT = 6969;
-const STX = 0x02;
-const ETX = 0x03;
-
-// In-memory database for approved tags
-let approvedTags = new Set();
-
-// Debounce tracking - stores last trigger timestamp for each tag
-const tagLastTriggered = new Map();
-
-function getLocalIP() {
-  const interfaces = os.networkInterfaces();
-  for (const name of Object.keys(interfaces)) {
-    const networkInterfaces = interfaces[name];
-    if (networkInterfaces) {
-      for (const netInterface of networkInterfaces) {
-        if (netInterface.family === 'IPv4' && !netInterface.internal) {
-          return netInterface.address;
-        }
-      }
-    }
-  }
-  return 'localhost';
-}
-
-async function fetchApprovedTags() {
-  const endpoint = process.env.APPROVED_TAGS_ENDPOINT;
-  if (!endpoint) {
-    console.log('⚠️  APPROVED_TAGS_ENDPOINT not configured in .env');
-    return [];
+class RfidServer {
+  constructor() {
+    this.server = null;
+    this.isRunning = false;
+    this.connectionCount = 0;
   }
 
-  return new Promise((resolve, reject) => {
-    console.log('🔄 Fetching approved tags from:', endpoint);
+  /**
+   * Initialize the server
+   */
+  async initialize() {
+    console.log('🚀 Initializing RFID Server...');
+    console.log(`⚙️  Server configuration: ${config.server.host}:${config.server.port}`);
+    console.log(`⏱️  Tag debounce: ${config.debounce.minutes} minutes`);
     
-    const client = endpoint.startsWith('https://') ? https : http;
-    const request = client.get(endpoint, (response) => {
-      let data = '';
-
-      response.on('data', (chunk) => {
-        data += chunk;
-      });
-
-      response.on('end', () => {
-        try {
-          const tags = JSON.parse(data);
-          if (Array.isArray(tags)) {
-            console.log(`✅ Loaded ${tags.length} approved tags`);
-            resolve(tags);
-          } else {
-            console.log('❌ Invalid response format - expected array');
-            resolve([]);
-          }
-        } catch (error) {
-          console.error('❌ Error parsing approved tags response:', error.message);
-          resolve([]);
-        }
-      });
-    });
-
-    request.on('error', (error) => {
-      console.error('❌ Error fetching approved tags:', error.message);
-      resolve([]);
-    });
-
-    request.setTimeout(5000, () => {
-      console.error('❌ Timeout fetching approved tags');
-      request.destroy();
-      resolve([]);
-    });
-  });
-}
-
-async function triggerEndpoint(tag) {
-  const endpoint = process.env.TRIGGER_ENDPOINT;
-  if (!endpoint) {
-    console.log('⚠️  TRIGGER_ENDPOINT not configured in .env');
-    return;
-  }
-
-  return new Promise((resolve) => {
-    console.log(`🚀 Triggering endpoint for approved tag: ${tag}`);
+    // Load initial approved tags
+    await this.loadApprovedTags();
     
-    const client = endpoint.startsWith('https://') ? https : http;
-    const request = client.get(`${endpoint}?tag=${encodeURIComponent(tag)}`, (response) => {
-      let data = '';
-
-      response.on('data', (chunk) => {
-        data += chunk;
-      });
-
-      response.on('end', () => {
-        console.log(`✅ Trigger response (${response.statusCode}):`, data.substring(0, 100));
-        resolve();
-      });
-    });
-
-    request.on('error', (error) => {
-      console.error('❌ Error triggering endpoint:', error.message);
-      resolve();
-    });
-
-    request.setTimeout(5000, () => {
-      console.error('❌ Timeout triggering endpoint');
-      request.destroy();
-      resolve();
-    });
-  });
-}
-
-async function loadApprovedTags() {
-  try {
-    const tags = await fetchApprovedTags();
-    approvedTags = new Set(tags);
-    console.log('📊 Approved tags database updated');
-  } catch (error) {
-    console.error('❌ Error loading approved tags:', error.message);
+    // Set up periodic tasks
+    this.setupPeriodicTasks();
+    
+    // Perform health check
+    await this.healthCheck();
+    
+    console.log('✅ Server initialization complete');
   }
-}
 
-function shouldDebounceTag(tag) {
-  const debounceMinutes = parseInt(process.env.DEBOUNCE_MINUTES) || 5;
-  const debounceMs = debounceMinutes * 60 * 1000;
-  const now = Date.now();
-  const lastTriggered = tagLastTriggered.get(tag);
-  
-  if (!lastTriggered) {
-    // First time seeing this tag
-    return false;
-  }
-  
-  const timeSinceLastTrigger = now - lastTriggered;
-  return timeSinceLastTrigger < debounceMs;
-}
-
-function markTagTriggered(tag) {
-  tagLastTriggered.set(tag, Date.now());
-}
-
-function cleanupOldTriggers() {
-  const debounceMinutes = parseInt(process.env.DEBOUNCE_MINUTES) || 5;
-  const cleanupThreshold = debounceMinutes * 60 * 1000 * 2; // Keep entries for 2x debounce time
-  const cutoffTime = Date.now() - cleanupThreshold;
-  
-  let cleanedCount = 0;
-  for (const [tag, timestamp] of tagLastTriggered.entries()) {
-    if (timestamp < cutoffTime) {
-      tagLastTriggered.delete(tag);
-      cleanedCount++;
-    }
-  }
-  
-  if (cleanedCount > 0) {
-    console.log(`🧹 Cleaned up ${cleanedCount} old trigger records`);
-  }
-}
-
-function extractTags(buf) {
-  const tags = [];
-  
-  while (true) {
-    // Find STX
-    const stxIndex = buf.indexOf(STX);
-    if (stxIndex === -1) {
-      // No STX left; clear buffer
-      buf.length = 0;
-      break;
-    }
-
-    // Drop anything before STX
-    if (stxIndex > 0) {
-      buf.splice(0, stxIndex);
-    }
-
-    // Find ETX
-    const etxIndex = buf.indexOf(ETX, 1);
-    if (etxIndex === -1) {
-      // Wait for more data
-      break;
-    }
-
-    // Extract payload between STX and ETX
-    const payload = Buffer.from(buf.slice(1, etxIndex));
-    buf.splice(0, etxIndex + 1);
-
-    // Strip CR/LF and spaces
-    const cleanPayload = payload.toString('ascii').trim();
-    if (cleanPayload) {
-      tags.push(cleanPayload);
+  /**
+   * Load approved tags from remote endpoint
+   */
+  async loadApprovedTags() {
+    console.log('📋 Loading approved tags database...');
+    const success = await tagDatabase.loadApprovedTags();
+    
+    if (success) {
+      const stats = tagDatabase.getStats();
+      console.log(`📊 Loaded ${stats.totalApprovedTags} approved tags`);
     }
   }
 
-  return tags;
-}
+  /**
+   * Set up periodic maintenance tasks
+   */
+  setupPeriodicTasks() {
+    // Refresh approved tags (if auto-update enabled)
+    if (config.tagDatabase.autoUpdate) {
+      setInterval(async () => {
+        console.log('🔄 Auto-refreshing approved tags database...');
+        await tagDatabase.loadApprovedTags();
+      }, config.intervals.refreshTags);
+      
+      console.log(`🔄 Tag database auto-update enabled (every ${config.tagDatabase.updateFrequencyMinutes} minutes)`);
+    } else {
+      console.log('⚠️  Tag database auto-update disabled');
+    }
+    
+    // Cleanup debounce records (automatically every 2x debounce time)
+    setInterval(() => {
+      debounceManager.cleanup();
+    }, config.intervals.cleanup);
+    
+    console.log(`🧹 Debounce cleanup runs every ${config.intervals.cleanup / 60000} minutes`);
+    console.log('⏰ Periodic tasks configured');
+  }
 
-async function main() {
-  // Load approved tags on startup
-  console.log('📋 Loading approved tags database...');
-  await loadApprovedTags();
-  
-  // Show debounce configuration
-  const debounceMinutes = parseInt(process.env.DEBOUNCE_MINUTES) || 5;
-  console.log(`⏱️  Tag debounce set to ${debounceMinutes} minutes`);
-  
-  // Refresh approved tags every 5 minutes
-  setInterval(async () => {
-    console.log('🔄 Refreshing approved tags database...');
-    await loadApprovedTags();
-  }, 5 * 60 * 1000);
-  
-  // Clean up old trigger records every 10 minutes
-  setInterval(() => {
-    cleanupOldTriggers();
-  }, 10 * 60 * 1000);
+  /**
+   * Perform health check on configured endpoints
+   */
+  async healthCheck() {
+    console.log('🏥 Performing health check...');
+    
+    try {
+      const health = await httpClient.healthCheck();
+      
+      console.log(`📡 Approved tags endpoint: ${health.approvedTags.configured ? '✅' : '❌'} configured, ${health.approvedTags.reachable ? '✅' : '⚠️'} reachable`);
+      console.log(`🎯 Trigger endpoint: ${health.trigger.configured ? '✅' : '❌'} configured`);
+    } catch (error) {
+      console.warn('⚠️  Health check failed:', error.message);
+    }
+  }
 
-  const server = net.createServer();
+  /**
+   * Process received RFID tag
+   */
+  async processTag(tag, clientAddress) {
+    console.log('🏷️ ', tag);
+    
+    // Check if tag is approved
+    if (!tagDatabase.isApproved(tag)) {
+      console.log('❌ Tag not in approved list:', tag);
+      console.log('--break--');
+      return;
+    }
 
-  server.on('connection', (socket) => {
-    const clientAddress = `${socket.remoteAddress}:${socket.remotePort}`;
-    console.log(`🔌 Connected: ${clientAddress}`);
+    // Check debounce
+    if (debounceManager.shouldDebounce(tag)) {
+      const timeRemaining = debounceManager.getTimeRemainingFormatted(tag);
+      console.log(`⏱️  Tag ${tag} debounced (${timeRemaining})`);
+      console.log('--break--');
+      return;
+    }
+
+    // Tag is approved and not debounced - trigger endpoint
+    console.log('✅ APPROVED TAG DETECTED:', tag);
+    
+    debounceManager.markTriggered(tag);
+    
+    if (config.isConfigured('trigger')) {
+      await httpClient.triggerEndpoint(tag);
+    } else {
+      console.log('⚠️  Trigger endpoint not configured - skipping trigger');
+    }
+    
+    console.log('--break--');
+  }
+
+  /**
+   * Handle new TCP connection
+   */
+  handleConnection(socket) {
+    this.connectionCount++;
+    const clientAddress = networkUtils.formatClientAddress(socket);
+    
+    console.log(`🔌 Connected: ${clientAddress} (total: ${this.connectionCount})`);
 
     let buffer = [];
 
     socket.on('data', async (data) => {
-      // Convert Buffer to array and append to our buffer
-      buffer = buffer.concat(Array.from(data));
-      
-      const tags = extractTags(buffer);
-      for (const tag of tags) {
-        console.log('🏷️ ', tag);
+      try {
+        // Convert Buffer to array and append to our buffer
+        buffer = buffer.concat(Array.from(data));
         
-        // Check if tag is approved
-        if (approvedTags.has(tag)) {
-          // Check debounce before triggering
-          if (shouldDebounceTag(tag)) {
-            const debounceMinutes = parseInt(process.env.DEBOUNCE_MINUTES) || 5;
-            console.log(`⏱️  Tag ${tag} debounced (triggered within ${debounceMinutes} minutes)`);
-          } else {
-            console.log('✅ APPROVED TAG DETECTED:', tag);
-            markTagTriggered(tag);
-            await triggerEndpoint(tag);
-          }
-        } else {
-          console.log('❌ Tag not in approved list:', tag);
+        // Extract tags using RFID protocol parser
+        const tags = rfidProtocol.extractTags(buffer);
+        
+        // Process each extracted tag
+        for (const tag of tags) {
+          await this.processTag(tag, clientAddress);
         }
-        
-        console.log('--break--');
+      } catch (error) {
+        console.error(`🚨 Error processing data from ${clientAddress}:`, error.message);
       }
     });
 
     socket.on('close', () => {
-      console.log(`❌ Disconnected: ${clientAddress}`);
+      this.connectionCount--;
+      console.log(`❌ Disconnected: ${clientAddress} (remaining: ${this.connectionCount})`);
     });
 
     socket.on('error', (err) => {
       console.error(`🚨 Socket error for ${clientAddress}:`, err.message);
     });
-  });
+  }
 
-  const ip = getLocalIP();
+  /**
+   * Start the TCP server
+   */
+  async start() {
+    if (this.isRunning) {
+      console.log('⚠️  Server is already running');
+      return;
+    }
+
+    await this.initialize();
+
+    this.server = net.createServer((socket) => {
+      this.handleConnection(socket);
+    });
+
+    const ip = networkUtils.getLocalIP();
+    
+    return new Promise((resolve, reject) => {
+      this.server.listen(config.server.port, config.server.host, () => {
+        this.isRunning = true;
+        
+        console.log(`🚀 RFID Server listening on ${ip}:${config.server.port}`);
+        console.log(`🏷️  Ready to receive RFID tags`);
+        
+        resolve();
+      });
+
+      this.server.on('error', (err) => {
+        console.error('🚨 Server error:', err);
+        reject(err);
+      });
+    });
+  }
+
+  /**
+   * Stop the server gracefully
+   */
+  async stop() {
+    if (!this.isRunning || !this.server) {
+      console.log('⚠️  Server is not running');
+      return;
+    }
+
+    return new Promise((resolve) => {
+      this.server.close(() => {
+        this.isRunning = false;
+        console.log('🛑 RFID Server stopped');
+        resolve();
+      });
+    });
+  }
+}
+
+// Main execution
+async function main() {
+  const server = new RfidServer();
   
-  server.listen(PORT, HOST, () => {
-    console.log(`🚀 RFID Server listening on ${ip}:${PORT}`);
+  try {
+    await server.start();
+  } catch (error) {
+    console.error('💥 Failed to start server:', error.message);
+    process.exit(1);
+  }
+
+  // Graceful shutdown handling
+  process.on('SIGINT', async () => {
+    console.log('\n🛑 Received shutdown signal...');
+    await server.stop();
+    process.exit(0);
   });
 
-  server.on('error', (err) => {
-    console.error('🚨 Server error:', err);
+  process.on('SIGTERM', async () => {
+    console.log('\n🛑 Received termination signal...');
+    await server.stop();
+    process.exit(0);
   });
 }
 
+// Export for testing
+module.exports = RfidServer;
+
+// Run if called directly
 if (require.main === module) {
   main().catch(console.error);
 }

@@ -1,98 +1,245 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Gativo - RFID TCP Server
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+A lightweight, modular Node.js server for processing RFID tag data via TCP connections. Validates tags against a remote database and triggers webhooks for approved tags with built-in debounce protection.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## 🚀 Features
 
-## Description
+- **TCP Server** - Receives RFID data using STX/ETX protocol on port 6969
+- **Tag Validation** - 1:1 exact matching against remote approved tags database  
+- **Webhook Triggers** - HTTP GET requests to configured endpoints for approved tags
+- **Debounce Protection** - Prevents duplicate triggers within configurable time window
+- **Auto-Refresh** - Periodically updates approved tags from remote endpoint
+- **Memory Management** - Automatic cleanup of old tracking records
+- **Error Resilience** - Graceful error handling and recovery
+- **Modular Design** - Clean, maintainable architecture with single responsibility modules
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## 📁 Project Structure
 
-## Project setup
-
-```bash
-$ npm install
+```
+├── rfid-server.js          # Main server entry point
+├── rfid-server-old.js      # Original monolithic version (backup)  
+├── server.py              # Original Python implementation
+├── package.json           # Dependencies and scripts
+├── .env                   # Environment configuration
+└── src/                   # Modular components
+    ├── config.js          # Environment configuration management
+    ├── network-utils.js   # Network utilities (IP detection, client formatting)
+    ├── http-client.js     # HTTP client for API calls
+    ├── debounce-manager.js # Tag debouncing logic
+    ├── rfid-protocol.js   # STX/ETX protocol parsing
+    └── tag-database.js    # Approved tags database management
 ```
 
-## Compile and run the project
+## ⚡ Quick Start
+
+### Installation
 
 ```bash
-# development
-$ npm run start
+# Clone the repository
+git clone <repository-url>
+cd gativo
 
-# watch mode
-$ npm run start:dev
+# Install dependencies
+npm install
 
-# production mode
-$ npm run start:prod
+# Configure environment
+cp .env.example .env
+# Edit .env with your endpoints
 ```
 
-## Run tests
+### Configuration
+
+Set these environment variables in `.env`:
+
+```env
+# Required endpoints
+TAGS_DB_ENDPOINT="https://api.example.com/approved-tags"
+TRIGGER_ENDPOINT="https://api.example.com/tag-detected"  
+
+# Default approved tags (merged with endpoint + used as fallback)
+DEFAULT_APPROVED_TAGS=["1234567890", "0987654321"]
+
+# Tag database auto-update configuration
+TAGS_DB_AUTOUPDATE=true                  # true/false - enable/disable auto-refresh
+TAGS_DB_UPDATE_FREQUENCY=5               # minutes - how often to refresh from endpoint
+
+# Timing configuration (optional - defaults shown)
+DEBOUNCE_MINUTES=5
+REQUEST_TIMEOUT_SECONDS=5
+```
+
+### Running
 
 ```bash
-# unit tests
-$ npm run test
+# Start the server
+npm start
 
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+# The server will display:
+# 🚀 RFID Server listening on 192.168.x.x:6969
+# 📊 Loaded X approved tags
+# ⏱️  Tag debounce set to 5 minutes
 ```
 
-## Deployment
+## 🔧 How It Works
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+### Tag Database Management
+- **Default Tags** - Loaded from `DEFAULT_APPROVED_TAGS` at startup
+- **Auto-Update** - Configurable refresh from endpoint (on/off + frequency)
+- **Smart Merging** - Remote tags merged with defaults on each update  
+- **Fallback Protection** - Uses defaults if endpoint fails or is unavailable
+- **Exact Matching** - Only accepts perfect 1:1 tag ID matches
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+### Processing Pipeline
+1. **TCP Connection** - RFID readers connect to port 6969
+2. **Protocol Parsing** - Extracts tag IDs from STX/ETX binary protocol  
+3. **Tag Validation** - Checks if tag exists in approved database (exact match)
+4. **Debounce Check** - Prevents duplicate triggers within time window
+5. **Webhook Trigger** - Makes GET request to configured endpoint for approved tags
+
+### Example Flow
+
+```
+🔌 Connected: 192.168.1.50:12345
+🏷️  ABC123456789
+✅ APPROVED TAG DETECTED: ABC123456789
+🚀 Triggering endpoint for approved tag: ABC123456789
+✅ Trigger response (200): {"success": true, "tag_id": "ABC123456789"}
+--break--
+
+🏷️  ABC123456789  (scanned again immediately)
+⏱️  Tag ABC123456789 debounced (4m remaining)
+--break--
+```
+
+## 🌐 API Integration
+
+### Approved Tags Endpoint
+
+Your `TAGS_DB_ENDPOINT` should return a JSON array:
+
+```json
+["TAG001", "TAG002", "ABC123456789", "DEF987654321"]
+```
+
+### Trigger Endpoint
+
+When an approved tag is detected, a GET request is made:
+
+```
+GET https://api.example.com/tag-detected?tag=ABC123456789
+```
+
+## 🛠️ Development
+
+### Module Overview
+
+- **`config.js`** - Centralized environment configuration
+- **`network-utils.js`** - IP detection and client address formatting
+- **`http-client.js`** - HTTP requests with timeout and error handling
+- **`debounce-manager.js`** - Tag timing logic and cleanup
+- **`rfid-protocol.js`** - STX/ETX binary protocol parsing
+- **`tag-database.js`** - In-memory approved tags management
+
+### Code Examples
+
+```javascript
+const config = require('./src/config');
+const tagDatabase = require('./src/tag-database');
+
+// Get server configuration
+console.log(config.server.port); // 6969
+
+// Check if tag is approved
+console.log(tagDatabase.isApproved('TAG001')); // true/false
+
+// Get database stats
+console.log(tagDatabase.getStats());
+```
+
+### Testing with Old Version
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+# Run simplified version (default)
+npm start
+
+# Run original monolithic version for comparison  
+npm run start:old
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## 🏗️ Architecture Benefits
 
-## Resources
+- **Lean & Fast** - Only essential features, ~490 lines total
+- **Single Responsibility** - Each module has one clear purpose
+- **Maintainable** - Easy to modify specific functionality  
+- **Testable** - Modules can be unit tested in isolation
+- **Production Ready** - Error handling, graceful shutdown, memory management
 
-Check out a few resources that may come in handy when working with NestJS:
+## 📊 Performance
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+- **Memory Efficient** - In-memory Set for O(1) tag lookups
+- **Auto-Cleanup** - Removes old debounce records every 10 minutes
+- **Minimal Dependencies** - Only `dotenv` required
+- **Low Latency** - Direct TCP connections, no HTTP overhead
 
-## Support
+## 🔒 Production Deployment
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+### Environment Variables
 
-## Stay in touch
+```env
+# Required
+TAGS_DB_ENDPOINT="https://your-api.com/approved-tags"
+TRIGGER_ENDPOINT="https://your-api.com/tag-detected"
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+# Optional
+DEBOUNCE_MINUTES=5  # Default: 5 minutes
+```
 
-## License
+### Process Management
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+```bash
+# Using PM2 (recommended)
+npm install -g pm2
+pm2 start rfid-server.js --name "gativo-rfid"
+pm2 startup
+pm2 save
+
+# Using systemd
+sudo systemctl enable gativo-rfid.service
+sudo systemctl start gativo-rfid.service
+```
+
+### Monitoring
+
+The server provides detailed console logging for monitoring:
+
+```
+🚀 RFID Server listening on 192.168.1.100:6969
+📋 Loading approved tags database...
+✅ Loaded 42 approved tags
+🔌 Connected: 192.168.1.50:12345
+🏷️  ABC123456789
+✅ APPROVED TAG DETECTED: ABC123456789
+🚀 Triggering endpoint for approved tag: ABC123456789
+```
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🆚 Evolution
+
+This project evolved from:
+- **Python TCP Server** (`server.py`) - Original implementation
+- **NestJS Version** (removed) - Over-engineered framework approach  
+- **Monolithic Node.js** (`rfid-server-old.js`) - Single file version
+- **Modular Node.js** (`rfid-server.js`) - Current clean architecture
+
+The current version provides the same functionality with better maintainability and significantly reduced complexity.

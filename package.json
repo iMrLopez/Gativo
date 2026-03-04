@@ -7,7 +7,8 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "start": "node rfid-server.js"
+    "start": "node rfid-server.js",
+    "start:old": "node rfid-server-old.js"
   },
   "dependencies": {
     "dotenv": "^16.0.3"
