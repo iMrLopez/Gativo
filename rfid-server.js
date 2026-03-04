@@ -12,6 +12,9 @@ const ETX = 0x03;
 // In-memory database for approved tags
 let approvedTags = new Set();
 
+// Debounce tracking - stores last trigger timestamp for each tag
+const tagLastTriggered = new Map();
+
 function getLocalIP() {
   const interfaces = os.networkInterfaces();
   for (const name of Object.keys(interfaces)) {
@@ -122,6 +125,43 @@ async function loadApprovedTags() {
   }
 }
 
+function shouldDebounceTag(tag) {
+  const debounceMinutes = parseInt(process.env.DEBOUNCE_MINUTES) || 5;
+  const debounceMs = debounceMinutes * 60 * 1000;
+  const now = Date.now();
+  const lastTriggered = tagLastTriggered.get(tag);
+  
+  if (!lastTriggered) {
+    // First time seeing this tag
+    return false;
+  }
+  
+  const timeSinceLastTrigger = now - lastTriggered;
+  return timeSinceLastTrigger < debounceMs;
+}
+
+function markTagTriggered(tag) {
+  tagLastTriggered.set(tag, Date.now());
+}
+
+function cleanupOldTriggers() {
+  const debounceMinutes = parseInt(process.env.DEBOUNCE_MINUTES) || 5;
+  const cleanupThreshold = debounceMinutes * 60 * 1000 * 2; // Keep entries for 2x debounce time
+  const cutoffTime = Date.now() - cleanupThreshold;
+  
+  let cleanedCount = 0;
+  for (const [tag, timestamp] of tagLastTriggered.entries()) {
+    if (timestamp < cutoffTime) {
+      tagLastTriggered.delete(tag);
+      cleanedCount++;
+    }
+  }
+  
+  if (cleanedCount > 0) {
+    console.log(`🧹 Cleaned up ${cleanedCount} old trigger records`);
+  }
+}
+
 function extractTags(buf) {
   const tags = [];
   
@@ -165,11 +205,20 @@ async function main() {
   console.log('📋 Loading approved tags database...');
   await loadApprovedTags();
   
+  // Show debounce configuration
+  const debounceMinutes = parseInt(process.env.DEBOUNCE_MINUTES) || 5;
+  console.log(`⏱️  Tag debounce set to ${debounceMinutes} minutes`);
+  
   // Refresh approved tags every 5 minutes
   setInterval(async () => {
     console.log('🔄 Refreshing approved tags database...');
     await loadApprovedTags();
   }, 5 * 60 * 1000);
+  
+  // Clean up old trigger records every 10 minutes
+  setInterval(() => {
+    cleanupOldTriggers();
+  }, 10 * 60 * 1000);
 
   const server = net.createServer();
 
@@ -189,8 +238,15 @@ async function main() {
         
         // Check if tag is approved
         if (approvedTags.has(tag)) {
-          console.log('✅ APPROVED TAG DETECTED:', tag);
-          await triggerEndpoint(tag);
+          // Check debounce before triggering
+          if (shouldDebounceTag(tag)) {
+            const debounceMinutes = parseInt(process.env.DEBOUNCE_MINUTES) || 5;
+            console.log(`⏱️  Tag ${tag} debounced (triggered within ${debounceMinutes} minutes)`);
+          } else {
+            console.log('✅ APPROVED TAG DETECTED:', tag);
+            markTagTriggered(tag);
+            await triggerEndpoint(tag);
+          }
         } else {
           console.log('❌ Tag not in approved list:', tag);
         }
