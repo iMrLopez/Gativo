@@ -68,6 +68,62 @@ DEBOUNCE_MINUTES=5
 REQUEST_TIMEOUT_SECONDS=5
 ```
 
+## 📡 Antenna Setup & Configuration
+
+### Hardware Connection Flow
+
+```mermaid
+flowchart LR
+    A[🏷️ RFID Antenna<br/>Tag Reader] --> B[📡 RS232<br/>Interface<br/>Config]
+    B --> C[🌐 RJ45/Network<br/>Connection<br/>TCP/IP]
+    C --> D[🖥️ Gativo Server<br/>Port 6969<br/>Tag Parser]
+    
+    A1[• Reads RFID tags<br/>• Sends via RS232<br/>• STX/ETX protocol] -.-> A
+    B1[• Configure network<br/>• Set server IP/port<br/>• Enable TCP mode] -.-> B
+    C1[• Points to server IP<br/>• Send tag data] -.-> C
+    D1[1. Parse STX/ETX<br/>2. Extract tag<br/>3. Validate tag<br/>4. Trigger GET] -.-> D
+    
+    style A fill:#e1f5fe
+    style B fill:#f3e5f5
+    style C fill:#e8f5e8
+    style D fill:#fff3e0
+```
+
+### Antenna Configuration Screenshots
+
+Configure your RFID antenna with these settings to connect to the Gativo server:
+
+#### 1. Network Settings
+Configure the antenna to point to your server's IP address and port 6969:
+
+![Network Configuration](docs/NetworkSetting.png)
+
+#### 2. Parameter Settings  
+Set up the basic communication parameters:
+
+![Parameter Configuration](docs/ParameterSet.png)
+
+#### 3. Advanced Settings
+Configure advanced protocol and connection settings:
+
+![Advanced Configuration](docs/AdvanceSet.png)
+
+### Setup Steps
+
+1. **Connect Antenna** - Connect RFID antenna via RS232 interface
+2. **Configure Network** - Set server IP address and port 6969 in antenna settings
+3. **Enable TCP Mode** - Ensure antenna is configured for TCP/IP communication  
+4. **Set Protocol** - Configure STX/ETX protocol for tag transmission
+5. **Test Connection** - Verify antenna can reach server IP/port
+6. **Start Server** - Run `npm start` to begin receiving tag data
+
+### Troubleshooting
+
+- **Connection Failed**: Check network connectivity between antenna and server
+- **No Tag Data**: Verify STX/ETX protocol is enabled on antenna
+- **Wrong Port**: Ensure antenna is configured to send data to port 6969
+- **IP Issues**: Confirm server IP address matches antenna configuration
+
 ### Running
 
 ```bash
