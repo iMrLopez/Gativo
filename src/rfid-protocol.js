@@ -9,7 +9,7 @@ class RfidProtocol {
   /**
    * Extract RFID tags from binary buffer using STX/ETX protocol
    * @param {Array<number>} buffer - Buffer array to process (will be modified)
-   * @returns {string[]} Array of extracted tag IDs
+   * @returns {Array} Array of tag objects with { tag, readerSn }
    */
   extractTags(buffer) {
     const tags = [];
@@ -45,7 +45,10 @@ class RfidProtocol {
       // Clean and validate the tag
       const tag = this._cleanTag(payload);
       if (tag) {
-        tags.push(tag);
+        tags.push({
+          tag: tag,
+          readerSn: 'hex-reader' // HEX protocol doesn't provide reader SN
+        });
       }
     }
 

@@ -4,6 +4,7 @@ const networkUtils = require('./src/network-utils');
 const httpClient = require('./src/http-client');
 const debounceManager = require('./src/debounce-manager');
 const rfidProtocol = require('./src/rfid-protocol');
+const httpProtocol = require('./src/http-protocol');
 const tagDatabase = require('./src/tag-database');
 
 class RfidServer {
@@ -11,6 +12,9 @@ class RfidServer {
     this.server = null;
     this.isRunning = false;
     this.connectionCount = 0;
+    
+    // Select protocol based on configuration
+    this.protocol = config.readerProtocol === 'HTTP' ? httpProtocol : rfidProtocol;
   }
 
   /**
@@ -19,6 +23,7 @@ class RfidServer {
   async initialize() {
     console.log('🚀 Initializing RFID Server...');
     console.log(`⚙️  Server configuration: ${config.server.host}:${config.server.port}`);
+    console.log(`📡 Reader protocol: ${config.readerProtocol}`);
     console.log(`⏱️  Tag debounce: ${config.debounce.minutes} minutes`);
     
     // Load initial approved tags
@@ -88,10 +93,11 @@ class RfidServer {
   }
 
   /**
-   * Process received RFID tag
+   * Process received RFID tag information
    */
-  async processTag(tag, clientAddress) {
-    console.log('🏷️ ', tag);
+  async processTag(tagInfo, clientAddress) {
+    const { tag, readerSn } = tagInfo;
+    console.log('🏷️ ', tag, readerSn ? `(Reader: ${readerSn})` : '');
     
     // Check if tag is approved
     if (!tagDatabase.isApproved(tag)) {
@@ -135,15 +141,20 @@ class RfidServer {
 
     socket.on('data', async (data) => {
       try {
-        // Convert Buffer to array and append to our buffer
-        buffer = buffer.concat(Array.from(data));
+        let tags = [];
         
-        // Extract tags using RFID protocol parser
-        const tags = rfidProtocol.extractTags(buffer);
+        if (config.readerProtocol === 'HTTP') {
+          // HTTP protocol - parse HTTP GET request directly
+          tags = this.protocol.extractTags(data);
+        } else {
+          // HEX protocol - use buffer accumulation
+          buffer = buffer.concat(Array.from(data));
+          tags = this.protocol.extractTags(buffer);
+        }
         
         // Process each extracted tag
-        for (const tag of tags) {
-          await this.processTag(tag, clientAddress);
+        for (const tagInfo of tags) {
+          await this.processTag(tagInfo, clientAddress);
         }
       } catch (error) {
         console.error(`🚨 Error processing data from ${clientAddress}:`, error.message);

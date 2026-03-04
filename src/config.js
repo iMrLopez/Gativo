@@ -26,6 +26,15 @@ class Config {
     };
   }
 
+  get readerProtocol() {
+    const protocol = (process.env.READER_PROTOCOL || 'HEX').toUpperCase();
+    if (!['HTTP', 'HEX'].includes(protocol)) {
+      console.warn('⚠️  Invalid READER_PROTOCOL, defaulting to HEX. Valid options: HTTP, HEX');
+      return 'HEX';
+    }
+    return protocol;
+  }
+
   get debounce() {
     return {
       minutes: parseInt(process.env.DEBOUNCE_MINUTES) || 5,
