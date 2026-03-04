@@ -1,10 +1,16 @@
 const net = require('net');
 const os = require('os');
+const https = require('https');
+const http = require('http');
+require('dotenv').config();
 
 const HOST = '0.0.0.0';
 const PORT = 6969;
 const STX = 0x02;
 const ETX = 0x03;
+
+// In-memory database for approved tags
+let approvedTags = new Set();
 
 function getLocalIP() {
   const interfaces = os.networkInterfaces();
@@ -19,6 +25,101 @@ function getLocalIP() {
     }
   }
   return 'localhost';
+}
+
+async function fetchApprovedTags() {
+  const endpoint = process.env.APPROVED_TAGS_ENDPOINT;
+  if (!endpoint) {
+    console.log('⚠️  APPROVED_TAGS_ENDPOINT not configured in .env');
+    return [];
+  }
+
+  return new Promise((resolve, reject) => {
+    console.log('🔄 Fetching approved tags from:', endpoint);
+    
+    const client = endpoint.startsWith('https://') ? https : http;
+    const request = client.get(endpoint, (response) => {
+      let data = '';
+
+      response.on('data', (chunk) => {
+        data += chunk;
+      });
+
+      response.on('end', () => {
+        try {
+          const tags = JSON.parse(data);
+          if (Array.isArray(tags)) {
+            console.log(`✅ Loaded ${tags.length} approved tags`);
+            resolve(tags);
+          } else {
+            console.log('❌ Invalid response format - expected array');
+            resolve([]);
+          }
+        } catch (error) {
+          console.error('❌ Error parsing approved tags response:', error.message);
+          resolve([]);
+        }
+      });
+    });
+
+    request.on('error', (error) => {
+      console.error('❌ Error fetching approved tags:', error.message);
+      resolve([]);
+    });
+
+    request.setTimeout(5000, () => {
+      console.error('❌ Timeout fetching approved tags');
+      request.destroy();
+      resolve([]);
+    });
+  });
+}
+
+async function triggerEndpoint(tag) {
+  const endpoint = process.env.TRIGGER_ENDPOINT;
+  if (!endpoint) {
+    console.log('⚠️  TRIGGER_ENDPOINT not configured in .env');
+    return;
+  }
+
+  return new Promise((resolve) => {
+    console.log(`🚀 Triggering endpoint for approved tag: ${tag}`);
+    
+    const client = endpoint.startsWith('https://') ? https : http;
+    const request = client.get(`${endpoint}?tag=${encodeURIComponent(tag)}`, (response) => {
+      let data = '';
+
+      response.on('data', (chunk) => {
+        data += chunk;
+      });
+
+      response.on('end', () => {
+        console.log(`✅ Trigger response (${response.statusCode}):`, data.substring(0, 100));
+        resolve();
+      });
+    });
+
+    request.on('error', (error) => {
+      console.error('❌ Error triggering endpoint:', error.message);
+      resolve();
+    });
+
+    request.setTimeout(5000, () => {
+      console.error('❌ Timeout triggering endpoint');
+      request.destroy();
+      resolve();
+    });
+  });
+}
+
+async function loadApprovedTags() {
+  try {
+    const tags = await fetchApprovedTags();
+    approvedTags = new Set(tags);
+    console.log('📊 Approved tags database updated');
+  } catch (error) {
+    console.error('❌ Error loading approved tags:', error.message);
+  }
 }
 
 function extractTags(buf) {
@@ -59,7 +160,17 @@ function extractTags(buf) {
   return tags;
 }
 
-function main() {
+async function main() {
+  // Load approved tags on startup
+  console.log('📋 Loading approved tags database...');
+  await loadApprovedTags();
+  
+  // Refresh approved tags every 5 minutes
+  setInterval(async () => {
+    console.log('🔄 Refreshing approved tags database...');
+    await loadApprovedTags();
+  }, 5 * 60 * 1000);
+
   const server = net.createServer();
 
   server.on('connection', (socket) => {
@@ -68,13 +179,22 @@ function main() {
 
     let buffer = [];
 
-    socket.on('data', (data) => {
+    socket.on('data', async (data) => {
       // Convert Buffer to array and append to our buffer
       buffer = buffer.concat(Array.from(data));
       
       const tags = extractTags(buffer);
       for (const tag of tags) {
         console.log('🏷️ ', tag);
+        
+        // Check if tag is approved
+        if (approvedTags.has(tag)) {
+          console.log('✅ APPROVED TAG DETECTED:', tag);
+          await triggerEndpoint(tag);
+        } else {
+          console.log('❌ Tag not in approved list:', tag);
+        }
+        
         console.log('--break--');
       }
     });
@@ -100,5 +220,5 @@ function main() {
 }
 
 if (require.main === module) {
-  main();
+  main().catch(console.error);
 }
