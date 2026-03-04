@@ -18,11 +18,22 @@ class HttpProtocol {
       
       const query = parts[1];
       
-      // Parse query parameters
+      // Parse query parameters - handle both /?param=value and direct param=value formats
       const params = {};
+      let queryString = '';
+      
       if (query.startsWith('/?')) {
-        // Remove /? prefix
-        const queryString = query.substring(2);
+        // Standard HTTP format: /?param=value
+        queryString = query.substring(2);
+      } else if (query.includes('=') && query.includes('&')) {
+        // Direct parameter format: param=value&param2=value2
+        queryString = query;
+      } else if (query.startsWith('/') && query.includes('=')) {
+        // Format: /param=value&param2=value2
+        queryString = query.substring(1);
+      }
+      
+      if (queryString) {
         queryString.split("&").forEach(pair => {
           const [key, value] = pair.split("=");
           if (key && value) {
@@ -32,6 +43,15 @@ class HttpProtocol {
       }
       
       // Extract tag ID and reader serial number
+      console.log('query is', query);
+      console.log('parsed params:', params);
+
+      // Check if this is a heartbeat/keep-alive request
+      if (params.heart === '1' || params.heartbeat === '1') {
+        console.log('💓 Heartbeat from reader:', params.readsn || 'unknown');
+        return []; // Return empty - this is not a tag read
+      }
+
       const tagId = params.id;
       const readerSn = params.readsn;
       
