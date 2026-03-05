@@ -41,10 +41,6 @@ class HttpProtocol {
           }
         });
       }
-      
-      // Extract tag ID and reader serial number
-      console.log('query is', query);
-      console.log('parsed params:', params);
 
       // Check if this is a heartbeat/keep-alive request
       if (params.heart === '1' || params.heartbeat === '1') {
