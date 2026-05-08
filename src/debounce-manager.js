@@ -2,68 +2,54 @@ const config = require('./config');
 
 class DebounceManager {
   constructor() {
-    // Map to track last trigger timestamp for each tag
     this.tagLastTriggered = new Map();
+    this.triggerLockedUntil = 0;
   }
 
-  /**
-   * Check if a tag should be debounced (blocked from triggering)
-   * @param {string} tag - Tag ID to check
-   * @returns {boolean} True if tag should be debounced
-   */
-  shouldDebounce(tag) {
-    const debounceMs = config.debounce.milliseconds;
+  shouldDebounceTag(tag) {
+    const debounceMs = config.debounce.tag.milliseconds;
     const now = Date.now();
     const lastTriggered = this.tagLastTriggered.get(tag);
-    
-    if (!lastTriggered) {
-      // First time seeing this tag
-      return false;
-    }
-    
-    const timeSinceLastTrigger = now - lastTriggered;
-    return timeSinceLastTrigger < debounceMs;
+    if (!lastTriggered) return false;
+    return (now - lastTriggered) < debounceMs;
   }
 
-  /**
-   * Mark a tag as triggered with current timestamp
-   * @param {string} tag - Tag ID that was triggered
-   */
-  markTriggered(tag) {
-    this.tagLastTriggered.set(tag, Date.now());
+  isTriggerLocked() {
+    return Date.now() < this.triggerLockedUntil;
   }
 
-  /**
-   * Get human-readable time remaining
-   * @param {string} tag - Tag ID to check
-   * @returns {string} Human readable time string
-   */
-  getTimeRemainingFormatted(tag) {
-    const lastTriggered = this.tagLastTriggered.get(tag);
-    
-    if (!lastTriggered) {
-      return 'Ready';
-    }
-    
-    const debounceMs = config.debounce.milliseconds;
-    const now = Date.now();
-    const timeSinceLastTrigger = now - lastTriggered;
-    const remaining = Math.max(0, debounceMs - timeSinceLastTrigger);
-    
-    if (remaining === 0) {
-      return 'Ready';
-    }
-    
+  getTriggerLockTimeRemainingFormatted() {
+    const remaining = Math.max(0, this.triggerLockedUntil - Date.now());
+    if (remaining === 0) return 'Ready';
     const minutes = Math.ceil(remaining / (60 * 1000));
     return `${minutes}m remaining`;
   }
 
-  /**
-   * Clean up old trigger records to prevent memory leaks
-   * @returns {number} Number of records cleaned up
-   */
+  markTriggered(tag) {
+    const now = Date.now();
+    this.tagLastTriggered.set(tag, now);
+
+    const triggerMs = config.debounce.trigger.milliseconds;
+    if (triggerMs > 0) {
+      this.triggerLockedUntil = now + triggerMs;
+      console.log(`🔒 Trigger lock armed for ${config.debounce.trigger.minutes}m — all tags blocked until lock expires`);
+    }
+  }
+
+  getTimeRemainingFormatted(tag) {
+    const lastTriggered = this.tagLastTriggered.get(tag);
+    if (!lastTriggered) return 'Ready';
+
+    const debounceMs = config.debounce.tag.milliseconds;
+    const remaining = Math.max(0, debounceMs - (Date.now() - lastTriggered));
+    if (remaining === 0) return 'Ready';
+
+    const minutes = Math.ceil(remaining / (60 * 1000));
+    return `${minutes}m remaining`;
+  }
+
   cleanup() {
-    const cleanupThreshold = config.debounce.milliseconds * 2; // Keep entries for 2x debounce time
+    const cleanupThreshold = Math.max(config.debounce.tag.milliseconds, config.debounce.trigger.milliseconds) * 2;
     const cutoffTime = Date.now() - cleanupThreshold;
     
     let cleanedCount = 0;

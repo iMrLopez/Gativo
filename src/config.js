@@ -36,10 +36,16 @@ class Config {
   }
 
   get debounce() {
+    const tagMinutes = parseInt(process.env.DEBOUNCE_TAG_MINUTES) || 5;
+    const triggerMinutes = parseInt(process.env.DEBOUNCE_TRIGGER_MINUTES) || 0;
     return {
-      minutes: parseInt(process.env.DEBOUNCE_MINUTES) || 5,
-      get milliseconds() {
-        return this.minutes * 60 * 1000;
+      tag: {
+        minutes: tagMinutes,
+        get milliseconds() { return this.minutes * 60 * 1000; }
+      },
+      trigger: {
+        minutes: triggerMinutes,
+        get milliseconds() { return this.minutes * 60 * 1000; }
       }
     };
   }
@@ -79,7 +85,7 @@ class Config {
     
     return {
       refreshTags: this.tagDatabase.updateFrequencyMs, // Use tag DB frequency
-      cleanup: this.debounce.milliseconds * 2,        // 2x debounce time for cleanup
+      cleanup: Math.max(this.debounce.tag.milliseconds, this.debounce.trigger.milliseconds) * 2,
       requestTimeout: timeoutSeconds * 1000           // seconds to milliseconds
     };
   }

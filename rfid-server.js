@@ -24,7 +24,8 @@ class RfidServer {
     console.log('🚀 Initializing RFID Server...');
     console.log(`⚙️  Server configuration: ${config.server.host}:${config.server.port}`);
     console.log(`📡 Reader protocol: ${config.readerProtocol}`);
-    console.log(`⏱️  Tag debounce: ${config.debounce.minutes} minutes`);
+    console.log(`⏱️  Tag debounce: ${config.debounce.tag.minutes} minutes`);
+    console.log(`⏱️  Trigger lock: ${config.debounce.trigger.minutes} minutes`);
     
     // Load initial approved tags
     await this.loadApprovedTags();
@@ -106,8 +107,16 @@ class RfidServer {
       return;
     }
 
-    // Check debounce
-    if (debounceManager.shouldDebounce(tag)) {
+    // Check global trigger lock (blocks ALL tags)
+    if (debounceManager.isTriggerLocked()) {
+      const timeRemaining = debounceManager.getTriggerLockTimeRemainingFormatted();
+      console.log(`🔒 Trigger locked — all tags blocked (${timeRemaining})`);
+      console.log('--break--');
+      return;
+    }
+
+    // Check per-tag debounce
+    if (debounceManager.shouldDebounceTag(tag)) {
       const timeRemaining = debounceManager.getTimeRemainingFormatted(tag);
       console.log(`⏱️  Tag ${tag} debounced (${timeRemaining})`);
       console.log('--break--');
@@ -116,7 +125,7 @@ class RfidServer {
 
     // Tag is approved and not debounced - trigger endpoint
     console.log('✅ APPROVED TAG DETECTED:', tag);
-    
+
     debounceManager.markTriggered(tag);
     
     if (config.isConfigured('trigger')) {
