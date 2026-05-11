@@ -2,6 +2,9 @@
 
 A lightweight, modular Node.js server for processing RFID tag data via TCP connections. Supports both **HTTP and HEX protocols** from RFID readers, validates tags against a remote database, and triggers webhooks for approved tags with built-in debounce protection.
 
+<img width="1432" height="1432" alt="image" src="https://github.com/user-attachments/assets/5defa537-86ef-435b-ad15-95a1a0ef1122" />
+
+
 ## 🚀 Features
 
 - **Dual Protocol Support** - HTTP GET requests and HEX binary (STX/ETX) protocols
